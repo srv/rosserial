@@ -42,8 +42,10 @@
 
 #include <ros/ros.h>
 #include <rosserial_msgs/TopicInfo.h>
+#include <rosserial_msgs/Log.h>
 #include <topic_tools/shape_shifter.h>
 #include <std_msgs/Time.h>
+#include "std_msgs/String.h"
 
 #include "rosserial_server/async_read_buffer.h"
 #include "rosserial_server/topic_handlers.h"
@@ -54,21 +56,12 @@ namespace rosserial_server
 typedef std::vector<uint8_t> Buffer;
 typedef boost::shared_ptr<Buffer> BufferPtr;
 
-template<typename Socket>
 class Session
 {
 public:
-  Session(boost::asio::io_service& io_service)
-    : socket_(io_service), client_version(PROTOCOL_UNKNOWN),
-      client_version_try(PROTOCOL_VER2),
-      timeout_interval_(boost::posix_time::milliseconds(5000)),
-      attempt_interval_(boost::posix_time::milliseconds(1000)),
-      require_check_interval_(boost::posix_time::milliseconds(1000)),
-      sync_timer_(io_service),
-      require_check_timer_(io_service),
-      async_read_buffer_(socket_, buffer_max,
-                         boost::bind(&Session::read_failed, this,
-                                     boost::asio::placeholders::error))
+  Session()
+    : client_version(PROTOCOL_UNKNOWN),
+      client_version_try(PROTOCOL_VER2)
   {
     callbacks_[rosserial_msgs::TopicInfo::ID_PUBLISHER]
         = boost::bind(&Session::setup_publisher, this, _1);
@@ -78,6 +71,8 @@ public:
         = boost::bind(&Session::setup_service_client_publisher, this, _1);
     callbacks_[rosserial_msgs::TopicInfo::ID_SERVICE_CLIENT+rosserial_msgs::TopicInfo::ID_SUBSCRIBER]
         = boost::bind(&Session::setup_service_client_subscriber, this, _1);
+    callbacks_[rosserial_msgs::TopicInfo::ID_LOG]
+        = boost::bind(&Session::handle_log, this, _1);
     callbacks_[rosserial_msgs::TopicInfo::ID_TIME]
         = boost::bind(&Session::handle_time, this, _1);
   }
@@ -87,17 +82,16 @@ public:
     ROS_INFO("Ending session.");
   }
 
-  Socket& socket()
-  {
-    return socket_;
-  }
-
   void start()
   {
     ROS_INFO("Starting session.");
 
-    attempt_sync();
-    read_sync_header();
+    // List the required topics
+    required_topics_check();
+
+    // Subscribe to ros topic
+    generic_sub_ = nh_.subscribe<std_msgs::String>("/generic_in", 1, &Session::genericCb, this);
+    generic_pub_ = nh_.advertise<std_msgs::String>("/generic_out", 1);
   }
 
   enum Version {
@@ -109,44 +103,14 @@ public:
 
 private:
   //// RECEIVING MESSAGES ////
-  // TODO: Total message timeout, implement primarily in ReadBuffer.
 
-  void read_sync_header() {
-    async_read_buffer_.read(1, boost::bind(&Session::read_sync_first, this, _1));
-  }
+  void genericCb(const std_msgs::String::ConstPtr& msg) {
 
-  void read_sync_first(ros::serialization::IStream& stream) {
-    uint8_t sync;
-    stream >> sync;
-    if (sync == 0xff) {
-      async_read_buffer_.read(1, boost::bind(&Session::read_sync_second, this, _1));
-    } else {
-      read_sync_header();
-    }
-  }
+    // TODO: convert the message to serial.
+    std::vector<uint8_t> mem;
+    size_t bytes_transferred = 10;
+    ros::serialization::IStream stream(&mem[0], bytes_transferred);
 
-  void read_sync_second(ros::serialization::IStream& stream) {
-    uint8_t sync;
-    stream >> sync;
-    if (client_version == PROTOCOL_UNKNOWN) {
-      if (sync == 0xff) {
-        ROS_WARN("Attached client is using protocol VER1 (groovy)");
-        client_version = PROTOCOL_VER1;
-      } else if (sync == 0xfe) {
-        ROS_INFO("Attached client is using protocol VER2 (hydro)");
-        client_version = PROTOCOL_VER2;
-      }
-    }
-    if (sync == 0xff && client_version == PROTOCOL_VER1) {
-      async_read_buffer_.read(4, boost::bind(&Session::read_id_length, this, _1));
-    } else if (sync == 0xfe && client_version == PROTOCOL_VER2) {
-      async_read_buffer_.read(5, boost::bind(&Session::read_id_length, this, _1));
-    } else {
-      read_sync_header();
-    }
-  }
-
-  void read_id_length(ros::serialization::IStream& stream) {
     uint16_t topic_id, length;
     uint8_t length_checksum;
     if (client_version == PROTOCOL_VER2) {
@@ -155,7 +119,6 @@ private:
       if (length_checksum + checksum(length) != 0xff) {
         uint8_t csl = checksum(length);
         ROS_WARN("Bad message header length checksum. Dropping message from client. T%d L%d C%d %d", topic_id, length, length_checksum, csl);
-        read_sync_header();
         return;
       } else {
         stream >> topic_id;
@@ -167,8 +130,7 @@ private:
     ROS_DEBUG("Received message header with length %d and topic_id=%d", length, topic_id);
 
     // Read message length + checksum byte.
-    async_read_buffer_.read(length + 1, boost::bind(&Session::read_body, this,
-                                                    _1, topic_id));
+    read_body(stream, topic_id);
   }
 
   void read_body(ros::serialization::IStream& stream, uint16_t topic_id) {
@@ -200,28 +162,12 @@ private:
         // TODO: Resynchronize on multiples?
       }
     }
-
-    // Kickoff next message read.
-    read_sync_header();
   }
 
-  void read_failed(const boost::system::error_code& error) {
-    if (error == boost::system::errc::no_buffer_space) {
-      // No worries. Begin syncing on a new message.
-      ROS_WARN("Overrun on receive buffer. Attempting to regain rx sync.");
-      read_sync_header();
-    } else if (error) {
-      // When some other read error has occurred, delete the whole session, which destroys
-      // all publishers and subscribers.
-      socket_.cancel();
-      ROS_DEBUG_STREAM("Socket asio error: " << error);
-      ROS_WARN("Stopping session due to read error.");
-      delete this;
-    }
-  }
 
   //// SENDING MESSAGES ////
 
+  // This function build the message
   void write_message(Buffer& message,
                      const uint16_t topic_id,
                      Session::Version version) {
@@ -251,89 +197,21 @@ private:
     memcpy(stream.advance(message.size()), &message[0], message.size());
     stream << msg_checksum;
 
-    // Will call immediately if we are already on the io_service thread. Otherwise,
-    // the request is queued up and executed on that thread.
-    socket_.get_io_service().dispatch(
-        boost::bind(&Session::write_buffer, this, buffer_ptr));
-  }
-
-  // Function which is dispatched onto the io_service thread by write_message, so that
-  // write_message may be safely called directly from the ROS background spinning thread.
-  void write_buffer(BufferPtr buffer_ptr) {
-    boost::asio::async_write(socket_, boost::asio::buffer(*buffer_ptr),
-          boost::bind(&Session::write_cb, this, boost::asio::placeholders::error, buffer_ptr));
-  }
-
-  void write_cb(const boost::system::error_code& error,
-                BufferPtr buffer_ptr) {
-    if (error) {
-      if (error == boost::system::errc::io_error) {
-        ROS_WARN_THROTTLE(1, "Socket write operation returned IO error.");
-      } else if (error == boost::system::errc::no_such_device) {
-        ROS_WARN_THROTTLE(1, "Socket write operation returned no device.");
-      } else {
-        socket_.cancel();
-        ROS_WARN_STREAM_THROTTLE(1, "Unknown error returned during write operation: " << error);
-        ROS_WARN("Destroying session.");
-        delete this;
-      }
-    }
-    // Buffer is destructed when this function exits.
+    // TODO: convert istream to payload message
+    std_msgs::String msg;
+    std::stringstream ss;
+    ss << "hello world ";
+    msg.data = ss.str();
+    generic_pub_.publish(msg);
   }
 
   //// SYNC WATCHDOG ////
-  void attempt_sync() {
-    request_topics();
-    set_sync_timeout(attempt_interval_);
-  }
 
-  void set_sync_timeout(const boost::posix_time::time_duration& interval) {
-    sync_timer_.cancel();
-    sync_timer_.expires_from_now(interval);
-    sync_timer_.async_wait(boost::bind(&Session::sync_timeout, this,
-          boost::asio::placeholders::error));
-  }
-
-  void sync_timeout(const boost::system::error_code& error) {
-    if (error == boost::asio::error::operation_aborted) {
-      return;
-    }
-    ROS_WARN("Sync with device lost.");
-    attempt_sync();
-  }
-
-  //// HELPERS ////
-  void request_topics() {
-    // Once this session has previously connected using a given protocol version,
-    // always attempt that one. If not, though, cycle between available options.
-    if (client_version != PROTOCOL_UNKNOWN) client_version_try = client_version;
-
-    std::vector<uint8_t> message(0);
-    if (client_version_try == PROTOCOL_VER2) {
-        ROS_DEBUG("Sending request topics message for VER2 protocol.");
-        write_message(message, rosserial_msgs::TopicInfo::ID_PUBLISHER, PROTOCOL_VER2);
-        client_version_try = PROTOCOL_VER1;
-    } else if (client_version_try == PROTOCOL_VER1) {
-        ROS_DEBUG("Sending request topics message for VER1 protocol.");
-        write_message(message, rosserial_msgs::TopicInfo::ID_PUBLISHER, PROTOCOL_VER1);
-        client_version_try = PROTOCOL_VER2;
-    } else {
-        client_version_try = PROTOCOL_VER2;
-    }
-
-    // Set timer for future point at which to verify the subscribers and publishers
-    // created by the client against the expected set given in the parameters.
-    require_check_timer_.expires_from_now(require_check_interval_);
-    require_check_timer_.async_wait(boost::bind(&Session::required_topics_check, this,
-          boost::asio::placeholders::error));
-  }
-
-  void required_topics_check(const boost::system::error_code& error) {
+  void required_topics_check() {
     if (ros::param::has("~require")) {
       if (!check_set("~require/publishers", publishers_) ||
           !check_set("~require/subscribers", subscribers_)) {
-        ROS_WARN("Connected client failed to establish the publishers and subscribers dictated by require parameter. Re-requesting topics.");
-        request_topics();
+        ROS_WARN("Connected client failed to establish the publishers and subscribers dictated by require parameter.");
       }
     }
   }
@@ -381,8 +259,6 @@ private:
     PublisherPtr pub(new Publisher(nh_, topic_info));
     publishers_[topic_info.topic_id] = pub;
     callbacks_[topic_info.topic_id] = boost::bind(&Publisher::handle, pub, _1);
-
-    set_sync_timeout(timeout_interval_);
   }
 
   void setup_subscriber(ros::serialization::IStream& stream) {
@@ -392,8 +268,6 @@ private:
     SubscriberPtr sub(new Subscriber(nh_, topic_info,
         boost::bind(&Session::write_message, this, _1, topic_info.topic_id, client_version)));
     subscribers_[topic_info.topic_id] = sub;
-
-    set_sync_timeout(timeout_interval_);
   }
 
   // When the rosserial client creates a ServiceClient object (and/or when it registers that object with the NodeHandle)
@@ -419,7 +293,6 @@ private:
       ROS_DEBUG("Service client %s: request message MD5 successfully validated as %s",
         topic_info.topic_name.c_str(),topic_info.md5sum.c_str());
     }
-    set_sync_timeout(timeout_interval_);
   }
 
   void setup_service_client_subscriber(ros::serialization::IStream& stream) {
@@ -441,7 +314,16 @@ private:
       ROS_DEBUG("Service client %s: response message MD5 successfully validated as %s",
         topic_info.topic_name.c_str(),topic_info.md5sum.c_str());
     }
-    set_sync_timeout(timeout_interval_);
+  }
+
+  void handle_log(ros::serialization::IStream& stream) {
+    rosserial_msgs::Log l;
+    ros::serialization::Serializer<rosserial_msgs::Log>::read(stream, l);
+    if(l.level == rosserial_msgs::Log::ROSDEBUG) ROS_DEBUG("%s", l.msg.c_str());
+    else if(l.level == rosserial_msgs::Log::INFO) ROS_INFO("%s", l.msg.c_str());
+    else if(l.level == rosserial_msgs::Log::WARN) ROS_WARN("%s", l.msg.c_str());
+    else if(l.level == rosserial_msgs::Log::ERROR) ROS_ERROR("%s", l.msg.c_str());
+    else if(l.level == rosserial_msgs::Log::FATAL) ROS_FATAL("%s", l.msg.c_str());
   }
 
   void handle_time(ros::serialization::IStream& stream) {
@@ -455,24 +337,14 @@ private:
     ros::serialization::Serializer<std_msgs::Time>::write(ostream, time);
 
     write_message(message, rosserial_msgs::TopicInfo::ID_TIME, client_version);
-
-    // The MCU requesting the time from the server is the sync notification. This
-    // call moves the timeout forward.
-    set_sync_timeout(timeout_interval_);
   }
 
-  Socket socket_;
-  AsyncReadBuffer<Socket> async_read_buffer_;
-  enum { buffer_max = 1023 };
   ros::NodeHandle nh_;
+  ros::Subscriber generic_sub_;
+  ros::Publisher generic_pub_;
 
   Session::Version client_version;
   Session::Version client_version_try;
-  boost::posix_time::time_duration timeout_interval_;
-  boost::posix_time::time_duration attempt_interval_;
-  boost::posix_time::time_duration require_check_interval_;
-  boost::asio::deadline_timer sync_timer_;
-  boost::asio::deadline_timer require_check_timer_;
 
   std::map< uint16_t, boost::function<void(ros::serialization::IStream)> > callbacks_;
   std::map<uint16_t, PublisherPtr> publishers_;

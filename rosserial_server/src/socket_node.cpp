@@ -48,11 +48,11 @@ int main(int argc, char* argv[])
   ros::param::param<int>("~port", port, 11411);
 
   // Listen for rosserial TCP connections in background thread.
-  boost::asio::io_service io_service;
-  rosserial_server::TcpServer<
-      rosserial_server::Session<boost::asio::ip::tcp::socket> > s(io_service, port);
-  boost::thread(boost::bind(&boost::asio::io_service::run, &io_service));
-  ROS_INFO_STREAM("Listening on port " << port);
+  // boost::asio::io_service io_service;
+  // rosserial_server::TcpServer<
+  //     rosserial_server::Session<boost::asio::ip::tcp::socket> > s(io_service, port);
+  // boost::thread(boost::bind(&boost::asio::io_service::run, &io_service));
+  // ROS_INFO_STREAM("Listening on port " << port);
 
   ros::spin();
   return 0;
