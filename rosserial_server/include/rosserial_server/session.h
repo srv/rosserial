@@ -50,6 +50,9 @@
 #include "rosserial_server/async_read_buffer.h"
 #include "rosserial_server/topic_handlers.h"
 
+
+
+
 namespace rosserial_server
 {
 
@@ -89,9 +92,9 @@ public:
     // List the required topics
     required_topics_check();
 
-    // Subscribe to ros topic
-    generic_sub_ = nh_.subscribe<std_msgs::String>("/generic_in", 1, &Session::genericCb, this);
-    generic_pub_ = nh_.advertise<std_msgs::String>("/generic_out", 1);
+    // Subscribe/publish to ros topic
+    generic_sub_ = nh_.subscribe<std_msgs::String>("in", 1, &Session::genericCb, this);
+    // generic_pub_ = nh_.advertise<std_msgs::String>("out", 1);
   }
 
   enum Version {
@@ -347,8 +350,8 @@ private:
   Session::Version client_version_try;
 
   std::map< uint16_t, boost::function<void(ros::serialization::IStream)> > callbacks_;
-  std::map<uint16_t, PublisherPtr> publishers_;
-  std::map<uint16_t, SubscriberPtr> subscribers_;
+  std::map< uint16_t, PublisherPtr > publishers_;
+  std::map< uint16_t, SubscriberPtr > subscribers_;
   std::map<std::string, ServiceClientPtr> services_;
 };
 
