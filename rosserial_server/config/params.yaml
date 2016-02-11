@@ -1,3 +1,0 @@
-require:
-    publishers: [ out ]
-    subscribers: [ in ]

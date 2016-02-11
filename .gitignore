@@ -1,2 +1,3 @@
 *.pyc
 rosserial_server/doc/
+rosserial_server/config/*

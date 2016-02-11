@@ -45,7 +45,7 @@
 #include <rosserial_msgs/Log.h>
 #include <topic_tools/shape_shifter.h>
 #include <std_msgs/Time.h>
-#include "std_msgs/String.h"
+#include <std_msgs/String.h>
 
 #include "rosserial_server/async_read_buffer.h"
 #include "rosserial_server/topic_handlers.h"
@@ -66,8 +66,7 @@ public:
     : client_version(PROTOCOL_UNKNOWN),
       client_version_try(PROTOCOL_VER2)
   {
-    callbacks_[rosserial_msgs::TopicInfo::ID_PUBLISHER]
-        = boost::bind(&Session::setup_publisher, this, _1);
+
     callbacks_[rosserial_msgs::TopicInfo::ID_SUBSCRIBER]
         = boost::bind(&Session::setup_subscriber, this, _1);
     callbacks_[rosserial_msgs::TopicInfo::ID_SERVICE_CLIENT+rosserial_msgs::TopicInfo::ID_PUBLISHER]
@@ -212,31 +211,43 @@ private:
 
   void required_topics_check() {
     if (ros::param::has("~require")) {
-      if (!check_set("~require/publishers", publishers_) ||
-          !check_set("~require/subscribers", subscribers_)) {
+      if (!check_set("~require/publishers", publishers_, true)) {
         ROS_WARN("Connected client failed to establish the publishers and subscribers dictated by require parameter.");
       }
+      /*
+      if (!check_set("~require/publishers", publishers_, true) ||
+          !check_set("~require/subscribers", subscribers_, false)) {
+        ROS_WARN("Connected client failed to establish the publishers and subscribers dictated by require parameter.");
+      }
+      */
     }
   }
 
   template<typename M>
-  bool check_set(std::string param_name, M map) {
+  bool check_set(std::string param_name, M map, bool is_pub) {
     XmlRpc::XmlRpcValue param_list;
     ros::param::get(param_name, param_list);
-    ROS_ASSERT(param_list.getType() == XmlRpc::XmlRpcValue::TypeArray);
-    for (int i = 0; i < param_list.size(); ++i) {
-      ROS_ASSERT(param_list[i].getType() == XmlRpc::XmlRpcValue::TypeString);
+    ROS_ASSERT(param_list.getType() == XmlRpc::XmlRpcValue::TypeStruct );
+    //for (int i = 0; i < param_list.size(); ++i) {
+    for (XmlRpc::XmlRpcValue::iterator it = param_list.begin(); it != param_list.end(); it++) {
+      XmlRpc::XmlRpcValue data = it->second;
+      ROS_ASSERT(data.getType() == XmlRpc::XmlRpcValue::TypeStruct );
+
+
+      ROS_INFO_STREAM("PASSSA: " << data["topic_id"]);
+      //ROS_ASSERT(out_value.getType() == XmlRpc::XmlRpcValue::TypeStruct);
+
+      /*
       std::string required_topic((std::string(param_list[i])));
-      // Iterate through map of registered topics, to ensure that this one is present.
-      bool found = false;
-      for (typename M::iterator j = map.begin(); j != map.end(); ++j) {
-        if (nh_.resolveName(j->second->get_topic()) ==
-            nh_.resolveName(required_topic)) {
-          found = true;
-          break;
-        }
-      }
-      if (!found) return false;
+
+      rosserial_msgs::TopicInfo topic_info;
+      topic_info.topic_id = 20;
+      topic_info.topic_name = nh_.resolveName(required_topic);
+      topic_info.buffer_size = 64;
+      if (is_pub)
+        setup_publisher(topic_info);
+      
+    */
     }
     return true;
   }
@@ -255,10 +266,7 @@ private:
 
   //// RECEIVED MESSAGE HANDLERS ////
 
-  void setup_publisher(ros::serialization::IStream& stream) {
-    rosserial_msgs::TopicInfo topic_info;
-    ros::serialization::Serializer<rosserial_msgs::TopicInfo>::read(stream, topic_info);
-
+  void setup_publisher(rosserial_msgs::TopicInfo topic_info) {
     PublisherPtr pub(new Publisher(nh_, topic_info));
     publishers_[topic_info.topic_id] = pub;
     callbacks_[topic_info.topic_id] = boost::bind(&Publisher::handle, pub, _1);
