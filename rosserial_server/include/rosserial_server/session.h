@@ -92,8 +92,8 @@ public:
     required_topics_check();
 
     // Subscribe/publish to ros topic
-    generic_sub_ = nh_.subscribe<std_msgs::String>("in", 1, &Session::genericCb, this);
-    // generic_pub_ = nh_.advertise<std_msgs::String>("out", 1);
+    //generic_sub_ = nh_.subscribe<std_msgs::String>("in", 1, &Session::genericCb, this);
+    generic_pub_ = nh_.advertise<std_msgs::String>("out", 1);
   }
 
   enum Version {
@@ -231,23 +231,26 @@ private:
     //for (int i = 0; i < param_list.size(); ++i) {
     for (XmlRpc::XmlRpcValue::iterator it = param_list.begin(); it != param_list.end(); it++) {
       XmlRpc::XmlRpcValue data = it->second;
-      ROS_ASSERT(data.getType() == XmlRpc::XmlRpcValue::TypeStruct );
-
-
-      ROS_INFO_STREAM("PASSSA: " << data["topic_id"]);
-      //ROS_ASSERT(out_value.getType() == XmlRpc::XmlRpcValue::TypeStruct);
-
-      /*
-      std::string required_topic((std::string(param_list[i])));
+      ROS_ASSERT(data.getType() == XmlRpc::XmlRpcValue::TypeStruct);
 
       rosserial_msgs::TopicInfo topic_info;
-      topic_info.topic_id = 20;
-      topic_info.topic_name = nh_.resolveName(required_topic);
-      topic_info.buffer_size = 64;
+
+      topic_info.topic_id = (int)data["topic_id"];
+      topic_info.topic_name = (std::string)data["topic_name"];
+      topic_info.message_type = (std::string)data["message_type"];
+      topic_info.buffer_size = (int)data["buffer_size"];
+
+      ROS_INFO("=======TOPIC_INFO=======");
+      ROS_INFO_STREAM("Size: "          << data.size());
+      ROS_INFO_STREAM("Topic_id: "      << topic_info.topic_id);
+      ROS_INFO_STREAM("Topic_name: "    << topic_info.topic_name);
+      ROS_INFO_STREAM("Message_type: "  << topic_info.message_type);
+      ROS_INFO_STREAM("Buffer_size: "   << topic_info.buffer_size);
+      ROS_INFO("========================");
+
       if (is_pub)
         setup_publisher(topic_info);
-      
-    */
+
     }
     return true;
   }
