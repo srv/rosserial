@@ -62,7 +62,7 @@ public:
       message_.morph(topic_info.md5sum, topic_info.message_type, info.response.definition, "false");
       publisher_ = message_.advertise(nh, topic_info.topic_name, 1);
     } else {
-      ROS_WARN("Failed to call message_info service. Proceeding without full message definition.");
+      ROS_ERROR("Publisher: failed to call message_info service.");
     }
   }
 
@@ -91,12 +91,20 @@ public:
   Subscriber(ros::NodeHandle& nh, rosserial_msgs::TopicInfo& topic_info,
       boost::function<void(std::vector<uint8_t> buffer)> write_fn)
     : write_fn_(write_fn) {
-    ros::SubscribeOptions opts;
-    opts.init<topic_tools::ShapeShifter>(
-        topic_info.topic_name, 1, boost::bind(&Subscriber::handle, this, _1));
-    opts.md5sum = topic_info.md5sum;
-    opts.datatype = topic_info.message_type;
-    subscriber_ = nh.subscribe(opts);
+
+    rosserial_msgs::RequestMessageInfo info;
+    info.request.type = topic_info.message_type;
+    if (message_service_.call(info)) {
+      topic_info.md5sum = info.response.md5;
+      ros::SubscribeOptions opts;
+      opts.init<topic_tools::ShapeShifter>(
+          topic_info.topic_name, 1, boost::bind(&Subscriber::handle, this, _1));
+      opts.md5sum = topic_info.md5sum;
+      opts.datatype = topic_info.message_type;
+      subscriber_ = nh.subscribe(opts);
+    } else {
+      ROS_ERROR("Subscriber: failed to call message_info service.");
+    }
   }
 
   std::string get_topic() {
