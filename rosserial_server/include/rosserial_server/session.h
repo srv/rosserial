@@ -246,7 +246,7 @@ private:
       topic_info.buffer_size = 64;
       if (is_pub)
         setup_publisher(topic_info);
-      
+
     */
     }
     return true;

@@ -58,16 +58,12 @@ public:
     rosserial_msgs::RequestMessageInfo info;
     info.request.type = topic_info.message_type;
     if (message_service_.call(info)) {
-      if (info.response.md5 != topic_info.md5sum) {
-        ROS_WARN_STREAM("Message" << topic_info.message_type  << "MD5 sum from client does not match that in system. Will avoid using system's message definition.");
-        info.response.definition = "";
-      }
+      topic_info.md5sum = info.response.md5;
+      message_.morph(topic_info.md5sum, topic_info.message_type, info.response.definition, "false");
+      publisher_ = message_.advertise(nh, topic_info.topic_name, 1);
     } else {
       ROS_WARN("Failed to call message_info service. Proceeding without full message definition.");
     }
-
-    message_.morph(topic_info.md5sum, topic_info.message_type, info.response.definition, "false");
-    publisher_ = message_.advertise(nh, topic_info.topic_name, 1);
   }
 
   void handle(ros::serialization::IStream stream) {
