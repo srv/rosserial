@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(rosserial_server)
 
-find_package(catkin REQUIRED COMPONENTS roscpp rosserial_msgs topic_tools)
+find_package(catkin REQUIRED COMPONENTS roscpp rosserial_msgs topic_tools evologics_ros)
 find_package(Boost REQUIRED COMPONENTS system thread)
 
 catkin_package(
@@ -19,6 +19,7 @@ add_executable(${PROJECT_NAME}_serial_node src/serial_node.cpp)
 target_link_libraries(${PROJECT_NAME}_serial_node ${catkin_LIBRARIES})
 set_target_properties(${PROJECT_NAME}_serial_node PROPERTIES OUTPUT_NAME serial_node PREFIX "")
 add_dependencies(${PROJECT_NAME}_serial_node rosserial_msgs_gencpp)
+add_dependencies(${PROJECT_NAME}_serial_node evologics_ros_gencpp)
 
 add_executable(${PROJECT_NAME}_socket_node src/socket_node.cpp)
 target_link_libraries(${PROJECT_NAME}_socket_node ${catkin_LIBRARIES})
