@@ -64,11 +64,9 @@ class Session
 public:
   Session()
     : client_version(PROTOCOL_UNKNOWN),
-      client_version_try(PROTOCOL_VER2)
+      client_version_try(PROTOCOL_VER2),
+      nhp_("~")
   {
-
-    callbacks_[rosserial_msgs::TopicInfo::ID_SUBSCRIBER]
-        = boost::bind(&Session::setup_subscriber, this, _1);
     callbacks_[rosserial_msgs::TopicInfo::ID_SERVICE_CLIENT+rosserial_msgs::TopicInfo::ID_PUBLISHER]
         = boost::bind(&Session::setup_service_client_publisher, this, _1);
     callbacks_[rosserial_msgs::TopicInfo::ID_SERVICE_CLIENT+rosserial_msgs::TopicInfo::ID_SUBSCRIBER]
@@ -92,8 +90,8 @@ public:
     required_topics_check();
 
     // Subscribe/publish to ros topic
-    generic_sub_ = nh_.subscribe<evologics_ros::AcousticModemPayload>("im/in", 1, &Session::genericCb, this);
-    // generic_pub_ = nh_.advertise<evologics_ros::AcousticModemPayload>("im/out", 1);
+    generic_sub_ = nhp_.subscribe<evologics_ros::AcousticModemPayload>("input", 1, &Session::genericCb, this);
+    generic_pub_ = nhp_.advertise<evologics_ros::AcousticModemPayload>("output", 1);
   }
 
   enum Version {
@@ -108,64 +106,29 @@ private:
 
   void genericCb(const evologics_ros::AcousticModemPayload::ConstPtr& msg) {
 
-    // TODO: convert the message to serial.
-    //std::string payload = msg.payload;
+    // Extract message
+    std::string payload = msg->payload;
+    std::vector<uint8_t> mem(payload.begin(), payload.end());
 
-    //
-    std::vector<uint8_t> mem;
-    size_t bytes_transferred = 10;
-    ros::serialization::IStream stream(&mem[0], bytes_transferred);
+    // Extract topic id
+    uint16_t topic_id = (uint16_t)mem[0];
 
-    uint16_t topic_id, length;
-    uint8_t length_checksum;
-    if (client_version == PROTOCOL_VER2) {
-      // Complex header with checksum byte for length field.
-      stream >> length >> length_checksum;
-      if (length_checksum + checksum(length) != 0xff) {
-        uint8_t csl = checksum(length);
-        ROS_WARN("Bad message header length checksum. Dropping message from client. T%d L%d C%d %d", topic_id, length, length_checksum, csl);
-        return;
-      } else {
-        stream >> topic_id;
-      }
-    } else if (client_version == PROTOCOL_VER1) {
-      // Simple header in VER1 protocol.
-      stream >> topic_id >> length;
-    }
-    ROS_DEBUG("Received message header with length %d and topic_id=%d", length, topic_id);
+    // Serialize
+    ros::serialization::IStream stream(&mem[1], mem.size()-1);
 
-    // Read message length + checksum byte.
-    read_body(stream, topic_id);
-  }
-
-  void read_body(ros::serialization::IStream& stream, uint16_t topic_id) {
-    ROS_DEBUG("Received body of length %d for message on topic %d.", stream.getLength(), topic_id);
-
-    ros::serialization::IStream checksum_stream(stream.getData(), stream.getLength());
-
-    uint8_t msg_checksum = checksum(checksum_stream) + checksum(topic_id);
-    if (client_version == PROTOCOL_VER1) {
-      msg_checksum += checksum(stream.getLength() - 1);
-    }
-
-    if (msg_checksum != 0xff) {
-      ROS_WARN("Rejecting message on topicId=%d, length=%d with bad checksum.", topic_id, stream.getLength());
-    } else {
-      if (callbacks_.count(topic_id) == 1) {
-        try {
-          callbacks_[topic_id](stream);
-        } catch(ros::serialization::StreamOverrunException e) {
-          if (topic_id < 100) {
-            ROS_ERROR("Buffer overrun when attempting to parse setup message.");
-            ROS_ERROR_ONCE("Is this firmware from a pre-Groovy rosserial?");
-          } else {
-            ROS_WARN("Buffer overrun when attempting to parse user message.");
-          }
+    if (callbacks_.count(topic_id) == 1) {
+      try {
+        callbacks_[topic_id](stream);
+      } catch(ros::serialization::StreamOverrunException e) {
+        if (topic_id < 100) {
+          ROS_ERROR("Buffer overrun when attempting to parse setup message.");
+          ROS_ERROR_ONCE("Is this firmware from a pre-Groovy rosserial?");
+        } else {
+          ROS_WARN("Buffer overrun when attempting to parse user message.");
         }
-      } else {
-        ROS_WARN("Received message with unrecognized topicId (%d).", topic_id);
-        // TODO: Resynchronize on multiples?
       }
+    } else {
+      ROS_WARN("Received message with unrecognized topicId (%d).", topic_id);
     }
   }
 
@@ -176,37 +139,24 @@ private:
   void write_message(Buffer& message,
                      const uint16_t topic_id,
                      Session::Version version) {
-    uint8_t overhead_bytes = 0;
-    switch(version) {
-      case PROTOCOL_VER2: overhead_bytes = 8; break;
-      case PROTOCOL_VER1: overhead_bytes = 7; break;
-      default:
-        ROS_WARN("Aborting write_message: protocol unspecified.");
-    }
 
-    uint16_t length = overhead_bytes + message.size();
+    // Insert topic ID
+    uint8_t topic_id8 = (uint8_t)topic_id;
+    message.insert(message.begin(), topic_id8);
+
+    /*
+    // Create message
+    uint16_t length = message.size();
     BufferPtr buffer_ptr(new Buffer(length));
-
-    uint8_t msg_checksum;
-    ros::serialization::IStream checksum_stream(message.size() > 0 ? &message[0] : NULL, message.size());
-
     ros::serialization::OStream stream(&buffer_ptr->at(0), buffer_ptr->size());
-    if (version == PROTOCOL_VER2) {
-      uint8_t msg_len_checksum = 255 - checksum(message.size());
-      stream << (uint16_t)0xfeff << (uint16_t)message.size() << msg_len_checksum << topic_id;
-      msg_checksum = 255 - (checksum(checksum_stream) + checksum(topic_id));
-    } else if (version == PROTOCOL_VER1) {
-      stream << (uint16_t)0xffff << topic_id << (uint16_t)message.size();
-      msg_checksum = 255 - (checksum(checksum_stream) + checksum(topic_id) + checksum(message.size()));
-    }
     memcpy(stream.advance(message.size()), &message[0], message.size());
-    stream << msg_checksum;
+    */
 
-    // TODO: convert istream to payload message
-    std_msgs::String msg;
-    std::stringstream ss;
-    ss << "hello world ";
-    msg.data = ss.str();
+    // Convert stream to payload message
+    evologics_ros::AcousticModemPayload msg;
+    // TODO: add address
+    std::string payload(message.begin(), message.end());
+    msg.payload = payload;
     generic_pub_.publish(msg);
   }
 
@@ -214,11 +164,14 @@ private:
 
   void required_topics_check() {
     if (ros::param::has("~require")) {
-      if (!check_set("~require/publishers", publishers_, true)) {
-        ROS_WARN("Connected client failed to establish the publishers and subscribers dictated by require parameter.");
+      if (!check_set_pub("~require/publishers")) {
+        ROS_WARN("Connected client failed to establish the publishers dictated by require parameter.");
+      }
+      if (!check_set_sub("~require/subscribers")) {
+        ROS_WARN("Connected client failed to establish the subscribers dictated by require parameter.");
       }
       /*
-      if (!check_set("~require/publishers", publishers_, true) ||
+      if (!check_set("~require/publishers", publishers_) ||
           !check_set("~require/subscribers", subscribers_, false)) {
         ROS_WARN("Connected client failed to establish the publishers and subscribers dictated by require parameter.");
       }
@@ -226,8 +179,8 @@ private:
     }
   }
 
-  template<typename M>
-  bool check_set(std::string param_name, M map, bool is_pub) {
+  bool check_set_pub(std::string param_name) {
+    if (!ros::param::has(param_name)) return false;
     XmlRpc::XmlRpcValue param_list;
     ros::param::get(param_name, param_list);
     ROS_ASSERT(param_list.getType() == XmlRpc::XmlRpcValue::TypeStruct );
@@ -237,24 +190,34 @@ private:
       ROS_ASSERT(data.getType() == XmlRpc::XmlRpcValue::TypeStruct);
 
       rosserial_msgs::TopicInfo topic_info;
-
       topic_info.topic_id = (int)data["topic_id"];
       topic_info.topic_name = (std::string)data["topic_name"];
       topic_info.message_type = (std::string)data["message_type"];
       topic_info.buffer_size = (int)data["buffer_size"];
-      //topic_info.md5sum = (std::string)data["md5sum"];
 
-      ROS_INFO("=======TOPIC_INFO=======");
-      ROS_INFO_STREAM("Size: "          << data.size());
-      ROS_INFO_STREAM("Topic_id: "      << topic_info.topic_id);
-      ROS_INFO_STREAM("Topic_name: "    << topic_info.topic_name);
-      ROS_INFO_STREAM("Message_type: "  << topic_info.message_type);
-      ROS_INFO_STREAM("Buffer_size: "   << topic_info.buffer_size);
-      //ROS_INFO_STREAM("md5sum: "        << topic_info.md5sum);
-      ROS_INFO("========================");
+      setup_publisher(topic_info);
 
-      if (is_pub)
-        setup_publisher(topic_info);
+    }
+    return true;
+  }
+
+  bool check_set_sub(std::string param_name) {
+    if (!ros::param::has(param_name)) return false;
+    XmlRpc::XmlRpcValue param_list;
+    ros::param::get(param_name, param_list);
+    ROS_ASSERT(param_list.getType() == XmlRpc::XmlRpcValue::TypeStruct );
+    //for (int i = 0; i < param_list.size(); ++i) {
+    for (XmlRpc::XmlRpcValue::iterator it = param_list.begin(); it != param_list.end(); it++) {
+      XmlRpc::XmlRpcValue data = it->second;
+      ROS_ASSERT(data.getType() == XmlRpc::XmlRpcValue::TypeStruct);
+
+      rosserial_msgs::TopicInfo topic_info;
+      topic_info.topic_id = (int)data["topic_id"];
+      topic_info.topic_name = (std::string)data["topic_name"];
+      topic_info.message_type = (std::string)data["message_type"];
+      topic_info.buffer_size = (int)data["buffer_size"];
+
+      setup_subscriber(topic_info);
 
     }
     return true;
@@ -280,10 +243,7 @@ private:
     callbacks_[topic_info.topic_id] = boost::bind(&Publisher::handle, pub, _1);
   }
 
-  void setup_subscriber(ros::serialization::IStream& stream) {
-    rosserial_msgs::TopicInfo topic_info;
-    ros::serialization::Serializer<rosserial_msgs::TopicInfo>::read(stream, topic_info);
-
+  void setup_subscriber(rosserial_msgs::TopicInfo topic_info) {
     SubscriberPtr sub(new Subscriber(nh_, topic_info,
         boost::bind(&Session::write_message, this, _1, topic_info.topic_id, client_version)));
     subscribers_[topic_info.topic_id] = sub;
@@ -359,6 +319,7 @@ private:
   }
 
   ros::NodeHandle nh_;
+  ros::NodeHandle nhp_;
   ros::Subscriber generic_sub_;
   ros::Publisher generic_pub_;
 

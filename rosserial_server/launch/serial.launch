@@ -1,9 +1,16 @@
 <launch>
 
 
-  <node pkg="rosserial_server" type="serial_node" name="rosserial_server" output="screen">
-  	<rosparam command="load" file="$(find rosserial_server)/config/params.yaml"/>
+  <node pkg="rosserial_server" type="serial_node" name="rosserial_server_usbl" output="screen">
+  	<rosparam command="load" file="$(find rosserial_server)/config/params_usbl.yaml"/>
+  	<remap from="/rosserial_server_usbl/input" to="/rosserial_server_auv/output"/>
   </node>
+
+  <node pkg="rosserial_server" type="serial_node" name="rosserial_server_auv" output="screen">
+  	<rosparam command="load" file="$(find rosserial_server)/config/params_auv.yaml"/>
+  </node>
+
+  <node pkg="acoustic_link" type="publisher" name="publisher" output="screen" />
 
   <node pkg="rosserial_python" type="message_info_service.py" name="rosserial_message_info" />
 </launch>
