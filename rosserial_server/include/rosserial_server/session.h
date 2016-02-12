@@ -50,7 +50,7 @@
 #include "rosserial_server/async_read_buffer.h"
 #include "rosserial_server/topic_handlers.h"
 
-
+#include "evologics_driver/AcousticModemPayload.h"
 
 
 namespace rosserial_server
@@ -92,8 +92,8 @@ public:
     required_topics_check();
 
     // Subscribe/publish to ros topic
-    //generic_sub_ = nh_.subscribe<std_msgs::String>("in", 1, &Session::genericCb, this);
-    generic_pub_ = nh_.advertise<std_msgs::String>("out", 1);
+    //generic_sub_ = nh_.subscribe<evologics_driver::AcousticModemPayload>("im/in", 1, &Session::genericCb, this);
+    generic_pub_ = nh_.advertise<evologics_driver::AcousticModemPayload>("im/out", 1);
   }
 
   enum Version {
@@ -106,9 +106,12 @@ public:
 private:
   //// RECEIVING MESSAGES ////
 
-  void genericCb(const std_msgs::String::ConstPtr& msg) {
+  void genericCb(const evologics_driver::AcousticModemPayload& msg) {
 
     // TODO: convert the message to serial.
+    //std::string payload = msg.payload;
+
+    //
     std::vector<uint8_t> mem;
     size_t bytes_transferred = 10;
     ros::serialization::IStream stream(&mem[0], bytes_transferred);
@@ -239,6 +242,7 @@ private:
       topic_info.topic_name = (std::string)data["topic_name"];
       topic_info.message_type = (std::string)data["message_type"];
       topic_info.buffer_size = (int)data["buffer_size"];
+      //topic_info.md5sum = (std::string)data["md5sum"];
 
       ROS_INFO("=======TOPIC_INFO=======");
       ROS_INFO_STREAM("Size: "          << data.size());
@@ -246,6 +250,7 @@ private:
       ROS_INFO_STREAM("Topic_name: "    << topic_info.topic_name);
       ROS_INFO_STREAM("Message_type: "  << topic_info.message_type);
       ROS_INFO_STREAM("Buffer_size: "   << topic_info.buffer_size);
+      //ROS_INFO_STREAM("md5sum: "        << topic_info.md5sum);
       ROS_INFO("========================");
 
       if (is_pub)

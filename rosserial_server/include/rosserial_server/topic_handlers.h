@@ -57,7 +57,12 @@ public:
 
     rosserial_msgs::RequestMessageInfo info;
     info.request.type = topic_info.message_type;
+    //topic_info.md5sum = info.response.md5; //ADDED (eric)
+    ROS_INFO_STREAM("info.response.md5---> " << info.response.md5);
+    ROS_INFO_STREAM("topic_info.md5sum---> " << topic_info.md5sum);
+    //ROS_INFO_STREAM("info.getMD5()---> " << info.response.getMD5());
     if (message_service_.call(info)) {
+      ROS_INFO_STREAM("message_service_.call(info)---> " << message_service_.call(info));
       if (info.response.md5 != topic_info.md5sum) {
         ROS_WARN_STREAM("Message" << topic_info.message_type  << "MD5 sum from client does not match that in system. Will avoid using system's message definition.");
         info.response.definition = "";
