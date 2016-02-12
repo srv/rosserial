@@ -46,7 +46,7 @@ namespace rosserial_server
 
 class Publisher {
 public:
-  Publisher(ros::NodeHandle& nh, const rosserial_msgs::TopicInfo& topic_info) {
+  Publisher(ros::NodeHandle& nh, rosserial_msgs::TopicInfo& topic_info) {
     if (!message_service_.isValid()) {
       // lazy-initialize the service caller.
       message_service_ = nh.serviceClient<rosserial_msgs::RequestMessageInfo>("message_info");
@@ -58,7 +58,9 @@ public:
     rosserial_msgs::RequestMessageInfo info;
     info.request.type = topic_info.message_type;
     if (message_service_.call(info)) {
+
       topic_info.md5sum = info.response.md5;
+
       message_.morph(topic_info.md5sum, topic_info.message_type, info.response.definition, "false");
       publisher_ = message_.advertise(nh, topic_info.topic_name, 1);
     } else {
@@ -92,9 +94,17 @@ public:
       boost::function<void(std::vector<uint8_t> buffer)> write_fn)
     : write_fn_(write_fn) {
 
+    if (!sub_message_service_.isValid()) {
+      // lazy-initialize the service caller.
+      sub_message_service_ = nh.serviceClient<rosserial_msgs::RequestMessageInfo>("message_info");
+      if (!sub_message_service_.waitForExistence(ros::Duration(5.0))) {
+        ROS_WARN("Timed out waiting for message_info service to become available.");
+      }
+    }
+
     rosserial_msgs::RequestMessageInfo info;
     info.request.type = topic_info.message_type;
-    if (message_service_.call(info)) {
+    if (sub_message_service_.call(info)) {
       topic_info.md5sum = info.response.md5;
       ros::SubscribeOptions opts;
       opts.init<topic_tools::ShapeShifter>(
@@ -123,9 +133,11 @@ private:
   }
 
   ros::Subscriber subscriber_;
+  static ros::ServiceClient sub_message_service_;
   boost::function<void(std::vector<uint8_t> buffer)> write_fn_;
 };
 
+ros::ServiceClient Subscriber::sub_message_service_;
 typedef boost::shared_ptr<Subscriber> SubscriberPtr;
 
 class ServiceClient {
