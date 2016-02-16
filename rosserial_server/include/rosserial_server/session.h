@@ -151,43 +151,33 @@ private:
   //// SYNC WATCHDOG ////
 
   void required_topics_check() {
-    //
+    // Get node address
+    XmlRpc::XmlRpcValue param;
+    ros::param::get("~origin_address", param);
+    int origin = (int)param;
+    ROS_INFO_STREAM("Origin: " << origin);
 
     // Publishers
-    if (ros::param::has("~require/publishers")) {
+    if (ros::param::has("~topics")) {
       rosserial_msgs::TopicInfo topic_info;
-      topic_info = fill_info("~require/publishers");
-      setup_publisher(topic_info);
+      topic_info = fill_info("~topics");
+      if (topic_info.address != origin) setup_publisher(topic_info);
+      else setup_subscriber(topic_info);
     }
-    else ROS_WARN("Connected client failed to establish the PUBLISHERS dictated by require parameter.");
+    else ROS_WARN("Failed to establish the TOPIC connections dictated by require parameter.");
 
 
-    // Subscribers
-    if (ros::param::has("~require/subscribers")) {
+    // Services
+    if (ros::param::has("~services")) {
       rosserial_msgs::TopicInfo topic_info;
-      topic_info = fill_info("~require/subscribers");
-      setup_subscriber(topic_info);
+      topic_info = fill_info("~services");
+      if (topic_info.address != origin) setup_service_publisher(topic_info);
+      else setup_service_subscriber(topic_info);
     }
-    else ROS_WARN("Connected client failed to establish the SUBSCRIBERS dictated by require parameter.");
-
-    // Service Client Pub
-    if (ros::param::has("~require/service_clients")) {
-      rosserial_msgs::TopicInfo topic_info;
-      topic_info = fill_info("~require/service_clients");
-      setup_service_publisher(topic_info);
-    }
-    else ROS_WARN("Connected client failed to establish the SERVICE CLIENTS dictated by require parameter.");
-
-    // Service Client Subs
-    if (ros::param::has("~require/service_servers")) {
-      rosserial_msgs::TopicInfo topic_info;
-      topic_info = fill_info("~require/service_servers");
-      setup_service_subscriber(topic_info);
-    }
-    else ROS_WARN("Connected client failed to establish the SERVICE SERVERS dictated by require parameter.");
+    else ROS_WARN("Failed to establish the SERVICE connections dictated by require parameter.");
   }
 
-  // Fill topic info
+
   rosserial_msgs::TopicInfo fill_info(std::string param_name) {
     XmlRpc::XmlRpcValue param_list;
     ros::param::get(param_name, param_list);
@@ -198,11 +188,18 @@ private:
       ROS_ASSERT(data.getType() == XmlRpc::XmlRpcValue::TypeStruct);
 
       rosserial_msgs::TopicInfo topic_info;
-      topic_info.topic_id = (int)data["topic_id"];
-      topic_info.topic_name = (std::string)data["topic_name"];
-      topic_info.message_type = (std::string)data["message_type"];
-      topic_info.buffer_size = (int)data["buffer_size"];
-      topic_info.address = (int)data["address"];
+      if (param_name == "~topics"){
+        topic_info.topic_id = (int)data["topic_id"];
+        topic_info.topic_name = (std::string)data["topic_name"];
+        topic_info.message_type = (std::string)data["message_type"];
+        topic_info.address = (int)data["destination_address"];
+      }
+      else{
+        topic_info.topic_id = (int)data["service_id"];
+        topic_info.topic_name = (std::string)data["service_name"];
+        topic_info.address = (int)data["owner_address"];
+      }
+
 
       return topic_info;
     }
