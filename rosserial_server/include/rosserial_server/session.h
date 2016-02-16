@@ -160,7 +160,7 @@ private:
     // Publishers
     if (ros::param::has("~topics")) {
       rosserial_msgs::TopicInfo topic_info;
-      topic_info = fill_topic_info("~topics");
+      topic_info = fill_info("~topics");
       if (topic_info.address != origin) setup_publisher(topic_info);
       else setup_subscriber(topic_info);
     }
@@ -170,7 +170,7 @@ private:
     // Services
     if (ros::param::has("~services")) {
       rosserial_msgs::TopicInfo topic_info;
-      topic_info = fill_service_info("~services");
+      topic_info = fill_info("~services");
       if (topic_info.address != origin) setup_service_client_publisher(topic_info);
       else setup_service_client_subscriber(topic_info);
     }
@@ -178,7 +178,7 @@ private:
   }
 
 
-  rosserial_msgs::TopicInfo fill_topic_info(std::string param_name) {
+  rosserial_msgs::TopicInfo fill_info(std::string param_name) {
     XmlRpc::XmlRpcValue param_list;
     ros::param::get(param_name, param_list);
     ROS_ASSERT(param_list.getType() == XmlRpc::XmlRpcValue::TypeStruct);
@@ -188,28 +188,18 @@ private:
       ROS_ASSERT(data.getType() == XmlRpc::XmlRpcValue::TypeStruct);
 
       rosserial_msgs::TopicInfo topic_info;
-      topic_info.topic_id = (int)data["topic_id"];
-      topic_info.topic_name = (std::string)data["topic_name"];
-      topic_info.message_type = (std::string)data["message_type"];
-      topic_info.address = (int)data["destination_address"];
+      if (param_name == "~topics"){
+        topic_info.topic_id = (int)data["topic_id"];
+        topic_info.topic_name = (std::string)data["topic_name"];
+        topic_info.message_type = (std::string)data["message_type"];
+        topic_info.address = (int)data["destination_address"];
+      }
+      else{
+        topic_info.topic_id = (int)data["service_id"];
+        topic_info.topic_name = (std::string)data["service_name"];
+        topic_info.address = (int)data["owner_address"];
+      }
 
-      return topic_info;
-    }
-  }
-
-  rosserial_msgs::TopicInfo fill_service_info(std::string param_name) {
-    XmlRpc::XmlRpcValue param_list;
-    ros::param::get(param_name, param_list);
-    ROS_ASSERT(param_list.getType() == XmlRpc::XmlRpcValue::TypeStruct);
-
-    for (XmlRpc::XmlRpcValue::iterator it = param_list.begin(); it != param_list.end(); it++) {
-      XmlRpc::XmlRpcValue data = it->second;
-      ROS_ASSERT(data.getType() == XmlRpc::XmlRpcValue::TypeStruct);
-
-      rosserial_msgs::TopicInfo topic_info;
-      topic_info.topic_id = (int)data["service_id"];
-      topic_info.topic_name = (std::string)data["service_name"];
-      topic_info.address = (int)data["owner_address"];
 
       return topic_info;
     }
