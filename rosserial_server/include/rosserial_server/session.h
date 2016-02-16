@@ -174,7 +174,7 @@ private:
     if (ros::param::has("~require/service_clients")) {
       rosserial_msgs::TopicInfo topic_info;
       topic_info = fill_info("~require/service_clients");
-      setup_service_client_publisher(topic_info);
+      setup_service_publisher(topic_info);
     }
     else ROS_WARN("Connected client failed to establish the SERVICE CLIENTS dictated by require parameter.");
 
@@ -182,7 +182,7 @@ private:
     if (ros::param::has("~require/service_servers")) {
       rosserial_msgs::TopicInfo topic_info;
       topic_info = fill_info("~require/service_servers");
-      setup_service_client_subscriber(topic_info);
+      setup_service_subscriber(topic_info);
     }
     else ROS_WARN("Connected client failed to establish the SERVICE SERVERS dictated by require parameter.");
   }
@@ -236,32 +236,22 @@ private:
     subscribers_[topic_info.topic_id] = sub;
   }
 
-  // When the rosserial client creates a ServiceClient object (and/or when it registers that object with the NodeHandle)
-  // it creates a publisher (to publish the service request message to us) and a subscriber (to receive the response)
-  // the service client callback is attached to the *subscriber*, so when we receive the service response
-  // and wish to send it over the socket to the client,
-  // we must attach the topicId that came from the service client subscriber message
-
-  void setup_service_client_publisher(rosserial_msgs::TopicInfo topic_info) {
-    if (!services_.count(topic_info.topic_name)) {
+  void setup_service_publisher(rosserial_msgs::TopicInfo topic_info) {
+    if (!service_publishers_.count(topic_info.topic_name)) {
       ROS_DEBUG("Creating service client for topic %s",topic_info.topic_name.c_str());
-      ServiceClientPtr srv(new ServiceClient(
+      ServiceServerPtr srv(new ServiceServer(
         nh_,topic_info,boost::bind(&Session::write_message, this, _1, topic_info, client_version)));
-      services_[topic_info.topic_name] = srv;
-      callbacks_[topic_info.topic_id] = boost::bind(&ServiceClient::handle, srv, _1);
+      service_publishers_[topic_info.topic_name] = srv;
     }
   }
 
-  void setup_service_client_subscriber(rosserial_msgs::TopicInfo topic_info) {
-    if (!services_.count(topic_info.topic_name)) {
+  void setup_service_subscriber(rosserial_msgs::TopicInfo topic_info) {
+    if (!service_subscribers_.count(topic_info.topic_name)) {
       ROS_DEBUG("Creating service client for topic %s",topic_info.topic_name.c_str());
-      ServiceClientPtr srv(new ServiceClient(
-        nh_,topic_info,boost::bind(&Session::write_message, this, _1, topic_info, client_version)));
-      services_[topic_info.topic_name] = srv;
+      ServiceClientPtr srv(new ServiceClient(nh_,topic_info));
+      service_subscribers_[topic_info.topic_name] = srv;
       callbacks_[topic_info.topic_id] = boost::bind(&ServiceClient::handle, srv, _1);
     }
-    // see above comment regarding the service client callback for why we set topic_id here
-    services_[topic_info.topic_name]->setTopicId(topic_info.topic_id);
   }
 
   void handle_log(ros::serialization::IStream& stream) {
@@ -286,7 +276,8 @@ private:
   std::map< uint16_t, boost::function<void(ros::serialization::IStream)> > callbacks_;
   std::map< uint16_t, PublisherPtr > publishers_;
   std::map< uint16_t, SubscriberPtr > subscribers_;
-  std::map<std::string, ServiceClientPtr> services_;
+  std::map<std::string, ServiceServerPtr> service_publishers_;
+  std::map<std::string, ServiceClientPtr> service_subscribers_;
 };
 
 }  // namespace
