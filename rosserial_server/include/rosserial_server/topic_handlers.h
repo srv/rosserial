@@ -123,7 +123,10 @@ public:
 
 private:
   void handle(const boost::shared_ptr<topic_tools::ShapeShifter const>& msg) {
+
+
     size_t length = ros::serialization::serializationLength(*msg);
+    //ROS_INFO_STREAM("Handle reciving message: " << *msg);
     std::vector<uint8_t> buffer(length);
 
     ros::serialization::OStream ostream(&buffer[0], length);
@@ -160,14 +163,15 @@ public:
     if (service_info_service_.call(info)) {
       request_message_md5_ = info.response.request_md5;
       response_message_md5_ = info.response.response_md5;
+      ros::ServiceClientOptions opts;
+      opts.service = topic_info.topic_name;
+      opts.md5sum = service_md5_ = info.response.service_md5;
+      opts.persistent = false; // always false for now
+      service_client_ = nh.serviceClient(opts);
     } else {
-      ROS_WARN("Failed to call service_info service. The service client will be created with blank md5sum.");
+      ROS_ERROR("ServiceClient: Failed to call service_info service. The service client will be created with blank md5sum.");
     }
-    ros::ServiceClientOptions opts;
-    opts.service = topic_info.topic_name;
-    opts.md5sum = service_md5_ = info.response.service_md5;
-    opts.persistent = false; // always false for now
-    service_client_ = nh.serviceClient(opts);
+    
   }
   void setTopicId(uint16_t topic_id) {
     topic_id_ = topic_id;

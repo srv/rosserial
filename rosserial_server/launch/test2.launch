@@ -1,0 +1,24 @@
+<launch>
+
+  <param name="use_sim_time" value="true" />
+
+  <arg name="bagfile" default="/home/eric/2015-06-08-20-30-18_1.bag"/>
+  <node pkg="rosbag" type="play" name="rosbag" args="-l --clock $(arg bagfile)"/>
+
+  <!--USBL node -->
+  <node pkg="rosserial_server" type="serial_node" name="rosserial_server_usbl" output="screen">
+  	<rosparam command="load" file="$(find rosserial_server)/config/params_usbl.yaml"/>
+  	<!--Remap: the input of the USBL node will be the output of the AUV -->
+  	<remap from="/rosserial_server_usbl/input" to="/rosserial_server_auv/output"/>
+  </node>
+
+  <!--AUV node -->
+  <node pkg="rosserial_server" type="serial_node" name="rosserial_server_auv" output="screen">
+  	<rosparam command="load" file="$(find rosserial_server)/config/params_auv.yaml"/>
+  </node>
+
+  <!--Service client -->
+
+  <!--Ros serial python -->
+  <node pkg="rosserial_python" type="message_info_service.py" name="rosserial_message_info" />
+</launch>

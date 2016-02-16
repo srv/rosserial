@@ -19,3 +19,6 @@ string md5sum
 
 # size of the buffer message must fit in
 int32 buffer_size
+
+# Address used by the USBL modem (Added)
+uint16 address

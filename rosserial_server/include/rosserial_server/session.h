@@ -67,14 +67,9 @@ public:
       client_version_try(PROTOCOL_VER2),
       nhp_("~")
   {
-    callbacks_[rosserial_msgs::TopicInfo::ID_SERVICE_CLIENT+rosserial_msgs::TopicInfo::ID_PUBLISHER]
-        = boost::bind(&Session::setup_service_client_publisher, this, _1);
-    callbacks_[rosserial_msgs::TopicInfo::ID_SERVICE_CLIENT+rosserial_msgs::TopicInfo::ID_SUBSCRIBER]
-        = boost::bind(&Session::setup_service_client_subscriber, this, _1);
+
     callbacks_[rosserial_msgs::TopicInfo::ID_LOG]
         = boost::bind(&Session::handle_log, this, _1);
-    callbacks_[rosserial_msgs::TopicInfo::ID_TIME]
-        = boost::bind(&Session::handle_time, this, _1);
   }
 
   virtual ~Session()
@@ -137,24 +132,17 @@ private:
 
   // This function build the message
   void write_message(Buffer& message,
-                     const uint16_t topic_id,
+                     rosserial_msgs::TopicInfo topic_info,
                      Session::Version version) {
 
     // Insert topic ID
-    uint8_t topic_id8 = (uint8_t)topic_id;
-    message.insert(message.begin(), topic_id8);
-
-    /*
-    // Create message
-    uint16_t length = message.size();
-    BufferPtr buffer_ptr(new Buffer(length));
-    ros::serialization::OStream stream(&buffer_ptr->at(0), buffer_ptr->size());
-    memcpy(stream.advance(message.size()), &message[0], message.size());
-    */
+    uint8_t topic_id = (uint8_t)topic_info.topic_id;
+    message.insert(message.begin(), topic_id);
 
     // Convert stream to payload message
     evologics_ros::AcousticModemPayload msg;
-    // TODO: add address
+    msg.address = (uint8_t)topic_info.address;
+
     std::string payload(message.begin(), message.end());
     msg.payload = payload;
     generic_pub_.publish(msg);
@@ -163,50 +151,48 @@ private:
   //// SYNC WATCHDOG ////
 
   void required_topics_check() {
-    if (ros::param::has("~require")) {
-      if (!check_set_pub("~require/publishers")) {
-        ROS_WARN("Connected client failed to establish the publishers dictated by require parameter.");
-      }
-      if (!check_set_sub("~require/subscribers")) {
-        ROS_WARN("Connected client failed to establish the subscribers dictated by require parameter.");
-      }
-      /*
-      if (!check_set("~require/publishers", publishers_) ||
-          !check_set("~require/subscribers", subscribers_, false)) {
-        ROS_WARN("Connected client failed to establish the publishers and subscribers dictated by require parameter.");
-      }
-      */
-    }
-  }
+    //
 
-  bool check_set_pub(std::string param_name) {
-    if (!ros::param::has(param_name)) return false;
-    XmlRpc::XmlRpcValue param_list;
-    ros::param::get(param_name, param_list);
-    ROS_ASSERT(param_list.getType() == XmlRpc::XmlRpcValue::TypeStruct );
-    //for (int i = 0; i < param_list.size(); ++i) {
-    for (XmlRpc::XmlRpcValue::iterator it = param_list.begin(); it != param_list.end(); it++) {
-      XmlRpc::XmlRpcValue data = it->second;
-      ROS_ASSERT(data.getType() == XmlRpc::XmlRpcValue::TypeStruct);
-
+    // Publishers
+    if (ros::param::has("~require/publishers")) {
       rosserial_msgs::TopicInfo topic_info;
-      topic_info.topic_id = (int)data["topic_id"];
-      topic_info.topic_name = (std::string)data["topic_name"];
-      topic_info.message_type = (std::string)data["message_type"];
-      topic_info.buffer_size = (int)data["buffer_size"];
-
+      topic_info = fill_info("~require/publishers");
       setup_publisher(topic_info);
-
     }
-    return true;
+    else ROS_WARN("Connected client failed to establish the PUBLISHERS dictated by require parameter.");
+
+
+    // Subscribers
+    if (ros::param::has("~require/subscribers")) {
+      rosserial_msgs::TopicInfo topic_info;
+      topic_info = fill_info("~require/subscribers");
+      setup_subscriber(topic_info);
+    }
+    else ROS_WARN("Connected client failed to establish the SUBSCRIBERS dictated by require parameter.");
+
+    // Service Client Pub
+    if (ros::param::has("~require/service_clients")) {
+      rosserial_msgs::TopicInfo topic_info;
+      topic_info = fill_info("~require/service_clients");
+      setup_service_client_publisher(topic_info);
+    }
+    else ROS_WARN("Connected client failed to establish the SERVICE CLIENTS dictated by require parameter.");
+
+    // Service Client Subs
+    if (ros::param::has("~require/service_servers")) {
+      rosserial_msgs::TopicInfo topic_info;
+      topic_info = fill_info("~require/service_servers");
+      setup_service_client_subscriber(topic_info);
+    }
+    else ROS_WARN("Connected client failed to establish the SERVICE SERVERS dictated by require parameter.");
   }
 
-  bool check_set_sub(std::string param_name) {
-    if (!ros::param::has(param_name)) return false;
+  // Fill topic info
+  rosserial_msgs::TopicInfo fill_info(std::string param_name) {
     XmlRpc::XmlRpcValue param_list;
     ros::param::get(param_name, param_list);
-    ROS_ASSERT(param_list.getType() == XmlRpc::XmlRpcValue::TypeStruct );
-    //for (int i = 0; i < param_list.size(); ++i) {
+    ROS_ASSERT(param_list.getType() == XmlRpc::XmlRpcValue::TypeStruct);
+
     for (XmlRpc::XmlRpcValue::iterator it = param_list.begin(); it != param_list.end(); it++) {
       XmlRpc::XmlRpcValue data = it->second;
       ROS_ASSERT(data.getType() == XmlRpc::XmlRpcValue::TypeStruct);
@@ -216,12 +202,13 @@ private:
       topic_info.topic_name = (std::string)data["topic_name"];
       topic_info.message_type = (std::string)data["message_type"];
       topic_info.buffer_size = (int)data["buffer_size"];
+      topic_info.address = (int)data["address"];
 
-      setup_subscriber(topic_info);
-
+      return topic_info;
     }
-    return true;
   }
+
+
 
   static uint8_t checksum(ros::serialization::IStream& stream) {
     uint8_t sum = 0;
@@ -245,7 +232,7 @@ private:
 
   void setup_subscriber(rosserial_msgs::TopicInfo topic_info) {
     SubscriberPtr sub(new Subscriber(nh_, topic_info,
-        boost::bind(&Session::write_message, this, _1, topic_info.topic_id, client_version)));
+        boost::bind(&Session::write_message, this, _1, topic_info, client_version)));
     subscribers_[topic_info.topic_id] = sub;
   }
 
@@ -255,44 +242,26 @@ private:
   // and wish to send it over the socket to the client,
   // we must attach the topicId that came from the service client subscriber message
 
-  void setup_service_client_publisher(ros::serialization::IStream& stream) {
-    rosserial_msgs::TopicInfo topic_info;
-    ros::serialization::Serializer<rosserial_msgs::TopicInfo>::read(stream, topic_info);
-
+  void setup_service_client_publisher(rosserial_msgs::TopicInfo topic_info) {
     if (!services_.count(topic_info.topic_name)) {
       ROS_DEBUG("Creating service client for topic %s",topic_info.topic_name.c_str());
       ServiceClientPtr srv(new ServiceClient(
-        nh_,topic_info,boost::bind(&Session::write_message, this, _1, _2, client_version)));
+        nh_,topic_info,boost::bind(&Session::write_message, this, _1, topic_info, client_version)));
       services_[topic_info.topic_name] = srv;
       callbacks_[topic_info.topic_id] = boost::bind(&ServiceClient::handle, srv, _1);
     }
-    if (services_[topic_info.topic_name]->getRequestMessageMD5() != topic_info.md5sum) {
-      ROS_WARN("Service client setup: Request message MD5 mismatch between rosserial client and ROS");
-    } else {
-      ROS_DEBUG("Service client %s: request message MD5 successfully validated as %s",
-        topic_info.topic_name.c_str(),topic_info.md5sum.c_str());
-    }
   }
 
-  void setup_service_client_subscriber(ros::serialization::IStream& stream) {
-    rosserial_msgs::TopicInfo topic_info;
-    ros::serialization::Serializer<rosserial_msgs::TopicInfo>::read(stream, topic_info);
-
+  void setup_service_client_subscriber(rosserial_msgs::TopicInfo topic_info) {
     if (!services_.count(topic_info.topic_name)) {
       ROS_DEBUG("Creating service client for topic %s",topic_info.topic_name.c_str());
       ServiceClientPtr srv(new ServiceClient(
-        nh_,topic_info,boost::bind(&Session::write_message, this, _1, _2, client_version)));
+        nh_,topic_info,boost::bind(&Session::write_message, this, _1, topic_info, client_version)));
       services_[topic_info.topic_name] = srv;
       callbacks_[topic_info.topic_id] = boost::bind(&ServiceClient::handle, srv, _1);
     }
     // see above comment regarding the service client callback for why we set topic_id here
     services_[topic_info.topic_name]->setTopicId(topic_info.topic_id);
-    if (services_[topic_info.topic_name]->getResponseMessageMD5() != topic_info.md5sum) {
-      ROS_WARN("Service client setup: Response message MD5 mismatch between rosserial client and ROS");
-    } else {
-      ROS_DEBUG("Service client %s: response message MD5 successfully validated as %s",
-        topic_info.topic_name.c_str(),topic_info.md5sum.c_str());
-    }
   }
 
   void handle_log(ros::serialization::IStream& stream) {
@@ -305,18 +274,6 @@ private:
     else if(l.level == rosserial_msgs::Log::FATAL) ROS_FATAL("%s", l.msg.c_str());
   }
 
-  void handle_time(ros::serialization::IStream& stream) {
-    std_msgs::Time time;
-    time.data = ros::Time::now();
-
-    size_t length = ros::serialization::serializationLength(time);
-    std::vector<uint8_t> message(length);
-
-    ros::serialization::OStream ostream(&message[0], length);
-    ros::serialization::Serializer<std_msgs::Time>::write(ostream, time);
-
-    write_message(message, rosserial_msgs::TopicInfo::ID_TIME, client_version);
-  }
 
   ros::NodeHandle nh_;
   ros::NodeHandle nhp_;
