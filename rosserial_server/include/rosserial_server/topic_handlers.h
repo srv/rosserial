@@ -94,7 +94,7 @@ class Subscriber {
 public:
   Subscriber(ros::NodeHandle& nh, rosserial_msgs::TopicInfo& topic_info,
       boost::function<void(std::vector<uint8_t> buffer)> write_fn)
-    : write_fn_(write_fn) {
+    : counter_(0), write_fn_(write_fn) {
     if (!sub_message_service_.isValid()) {
       // lazy-initialize the service caller.
       sub_message_service_ = nh.serviceClient<rosserial_msgs::RequestMessageInfo>("message_info");
@@ -102,6 +102,8 @@ public:
         ROS_WARN("Timed out waiting for message_info service to become available.");
       }
     }
+
+    drop_ = topic_info.drop;
 
     rosserial_msgs::RequestMessageInfo info;
     info.request.type = topic_info.message_type;
@@ -124,18 +126,21 @@ public:
 
 private:
   void handle(const boost::shared_ptr<topic_tools::ShapeShifter const>& msg) {
+    counter_++;
+    if (counter_ == drop_){
+      size_t length = ros::serialization::serializationLength(*msg);
+      std::vector<uint8_t> buffer(length);
 
+      ros::serialization::OStream ostream(&buffer[0], length);
+      ros::serialization::Serializer<topic_tools::ShapeShifter>::write(ostream, *msg);
 
-    size_t length = ros::serialization::serializationLength(*msg);
-    //ROS_INFO_STREAM("Handle reciving message: " << *msg);
-    std::vector<uint8_t> buffer(length);
-
-    ros::serialization::OStream ostream(&buffer[0], length);
-    ros::serialization::Serializer<topic_tools::ShapeShifter>::write(ostream, *msg);
-
-    write_fn_(buffer);
+      write_fn_(buffer);
+      counter_ = 0;
+    }
   }
 
+  int drop_;
+  int counter_;
   ros::Subscriber subscriber_;
   static ros::ServiceClient sub_message_service_;
   boost::function<void(std::vector<uint8_t> buffer)> write_fn_;
@@ -162,18 +167,24 @@ public:
     ROS_DEBUG("Calling service_info service for service name %s",topic_info.topic_name.c_str());
     if (service_info_service_.call(info)) {
       ros::AdvertiseServiceOptions opts;
-      opts.service = topic_info.topic_name;
+      opts.init<std_srvs::Empty>(
+          topic_info.topic_name, boost::bind(&ServiceServer::handle, this, _1, _2));
       opts.md5sum = info.response.service_md5;
+      opts.req_datatype = topic_info.message_type;
+      opts.res_datatype = topic_info.message_type;
+      opts.datatype = topic_info.message_type;
       service_server_ = nh.advertiseService(opts);
     } else {
       ROS_ERROR("ServiceServer: Failed to call service_info service.");
     }
   }
 
-  void handle() {
+  bool handle(const std_srvs::Empty::Request request, const std_srvs::Empty::Response response) {
+    ROS_INFO("Publishing service from SERVICE SERVER");
     // Send no information
     std::vector<uint8_t> buffer(0);
     write_fn_(buffer);
+    return true;
   }
 
 private:
@@ -212,6 +223,7 @@ public:
   }
 
   void handle(ros::serialization::IStream stream) {
+    ROS_INFO("Recived subscribed service act as SERVICE CLIENT");
     std_srvs::Empty::Request request;
     std_srvs::Empty::Response response;
     service_client_.call(request, response);

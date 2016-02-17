@@ -85,8 +85,10 @@ public:
     required_topics_check();
 
     // Subscribe/publish to ros topic
-    generic_sub_ = nhp_.subscribe<evologics_ros::AcousticModemPayload>("input", 1, &Session::genericCb, this);
-    generic_pub_ = nhp_.advertise<evologics_ros::AcousticModemPayload>("output", 1);
+    instant_sub_ = nhp_.subscribe<evologics_ros::AcousticModemPayload>("im/in", 1, &Session::genericCb, this);
+    instant_pub_ = nhp_.advertise<evologics_ros::AcousticModemPayload>("im/out", 1);
+    burst_sub_ = nhp_.subscribe<evologics_ros::AcousticModemPayload>("burst/in", 1, &Session::genericCb, this);
+    burst_pub_ = nhp_.advertise<evologics_ros::AcousticModemPayload>("burst/out", 1);
   }
 
   enum Version {
@@ -145,7 +147,14 @@ private:
 
     std::string payload(message.begin(), message.end());
     msg.payload = payload;
-    generic_pub_.publish(msg);
+    if (payload.size() <= 64){
+      instant_pub_.publish(msg);
+      ROS_INFO_STREAM("IM (" << payload.size() << " Bytes): " <<topic_info.topic_name);
+    }
+    else{
+      burst_pub_.publish(msg);
+      ROS_INFO_STREAM("BURST (" << payload.size() << " Bytes): " <<topic_info.topic_name);
+    } 
   }
 
   //// SYNC WATCHDOG ////
@@ -153,32 +162,21 @@ private:
   void required_topics_check() {
     // Get node address
     XmlRpc::XmlRpcValue param;
-    ros::param::get("~origin_address", param);
-    int origin = (int)param;
-    ROS_INFO_STREAM("Origin: " << origin);
+    ros::param::get("~station_address", param);
+    int station = (int)param;
+    ROS_INFO_STREAM("station: " << station);
 
     // Publishers
-    if (ros::param::has("~topics")) {
-      rosserial_msgs::TopicInfo topic_info;
-      topic_info = fill_info("~topics");
-      if (topic_info.address != origin) setup_publisher(topic_info);
-      else setup_subscriber(topic_info);
-    }
+    if (ros::param::has("~topics")) fill_info("~topics", station);
     else ROS_WARN("Failed to establish the TOPIC connections dictated by require parameter.");
 
-
     // Services
-    if (ros::param::has("~services")) {
-      rosserial_msgs::TopicInfo topic_info;
-      topic_info = fill_info("~services");
-      if (topic_info.address != origin) setup_service_publisher(topic_info);
-      else setup_service_subscriber(topic_info);
-    }
+    if (ros::param::has("~services")) fill_info("~services",station);
     else ROS_WARN("Failed to establish the SERVICE connections dictated by require parameter.");
   }
 
 
-  rosserial_msgs::TopicInfo fill_info(std::string param_name) {
+  void fill_info(std::string param_name, int station) {
     XmlRpc::XmlRpcValue param_list;
     ros::param::get(param_name, param_list);
     ROS_ASSERT(param_list.getType() == XmlRpc::XmlRpcValue::TypeStruct);
@@ -193,15 +191,30 @@ private:
         topic_info.topic_name = (std::string)data["topic_name"];
         topic_info.message_type = (std::string)data["message_type"];
         topic_info.address = (int)data["destination_address"];
+        topic_info.drop = (int)data["drop"];
+        if (topic_info.address == station){ 
+          setup_publisher(topic_info);
+          ROS_INFO_STREAM("\n\tSETUP: PUBLISHER\n\t Topic name: " << topic_info.topic_name << "\n\t Station: " << station);
+        }
+        else {
+          setup_subscriber(topic_info);
+          ROS_INFO_STREAM("\n\tSETUP: SUBSCRIBER\n\t Topic name: " << topic_info.topic_name << "\n\t Station: " << station);
+        } 
       }
       else{
         topic_info.topic_id = (int)data["service_id"];
         topic_info.topic_name = (std::string)data["service_name"];
+        topic_info.message_type = "std_srvs/Empty";
         topic_info.address = (int)data["owner_address"];
-      }
-
-
-      return topic_info;
+        if (topic_info.address == station) {
+          setup_service_publisher(topic_info);
+          ROS_INFO_STREAM("\n\tSETUP: SERVICE PUBLISHER\n\t Topic name: " << topic_info.topic_name << "\n\t Station: " << station);
+        } 
+          else {
+            setup_service_subscriber(topic_info);
+            ROS_INFO_STREAM("\n\tSETUP: SERVICE SUBSCRIBER\n\t Topic name: " << topic_info.topic_name << "\n\t Station: " << station);
+          } 
+        }
     }
   }
 
@@ -235,7 +248,7 @@ private:
 
   void setup_service_publisher(rosserial_msgs::TopicInfo topic_info) {
     if (!service_publishers_.count(topic_info.topic_name)) {
-      ROS_DEBUG("Creating service client for topic %s",topic_info.topic_name.c_str());
+      ROS_DEBUG("Creating service publisher for topic %s",topic_info.topic_name.c_str());
       ServiceServerPtr srv(new ServiceServer(
         nh_,topic_info,boost::bind(&Session::write_message, this, _1, topic_info, client_version)));
       service_publishers_[topic_info.topic_name] = srv;
@@ -244,7 +257,7 @@ private:
 
   void setup_service_subscriber(rosserial_msgs::TopicInfo topic_info) {
     if (!service_subscribers_.count(topic_info.topic_name)) {
-      ROS_DEBUG("Creating service client for topic %s",topic_info.topic_name.c_str());
+      ROS_DEBUG("Creating service subscriber for topic %s",topic_info.topic_name.c_str());
       ServiceClientPtr srv(new ServiceClient(nh_,topic_info));
       service_subscribers_[topic_info.topic_name] = srv;
       callbacks_[topic_info.topic_id] = boost::bind(&ServiceClient::handle, srv, _1);
@@ -264,8 +277,10 @@ private:
 
   ros::NodeHandle nh_;
   ros::NodeHandle nhp_;
-  ros::Subscriber generic_sub_;
-  ros::Publisher generic_pub_;
+  ros::Subscriber instant_sub_;
+  ros::Publisher instant_pub_;
+  ros::Subscriber burst_sub_;
+  ros::Publisher burst_pub_;
 
   Session::Version client_version;
   Session::Version client_version_try;

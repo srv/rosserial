@@ -22,3 +22,6 @@ int32 buffer_size
 
 # Address used by the USBL modem (Added)
 uint16 address
+
+# Drop used by the USBL modem (Added) decrease the topic frequency to win bandwidth (1/Drop are mantained)
+uint16 drop
