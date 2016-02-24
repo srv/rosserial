@@ -22,6 +22,10 @@
   <!--Service Server -->
   <node pkg="tests" type="service_server" name="service_server" output="screen" />
 
+  <!--USBLposition -->
+  <node pkg="USBLposition" type="USBLposition" name="USBLposition"/>
+  <node pkg="USBLposition" type="USBLpublisher" name="USBLpublisher"/>
+
   <!--Ros serial python -->
   <node pkg="rosserial_python" type="message_info_service.py" name="rosserial_message_info" />
 </launch>

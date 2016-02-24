@@ -1,20 +1,8 @@
 <launch>
-  <!--USBL node -->
-  <node pkg="rosserial_server" type="serial_node" name="rosserial_server_usbl" output="screen">
-  	<rosparam command="load" file="$(find rosserial_server)/config/params_usbl.yaml"/>
-    <remap from="/rosserial_server_usbl/im/in" to="/rosserial_server_auv/im/out"/>
-    <remap from="/rosserial_server_usbl/burst/in" to="/rosserial_server_auv/burst/out"/>
-  </node>
-
   <!--AUV node -->
   <node pkg="rosserial_server" type="serial_node" name="rosserial_server_auv" output="screen">
   	<rosparam command="load" file="$(find rosserial_server)/config/params_auv.yaml"/>
-    <remap from="/rosserial_server_auv/im/in" to="/rosserial_server_usbl/im/out"/>
-    <remap from="/rosserial_server_auv/burst/in" to="/rosserial_server_usbl/burst/out"/>
   </node>
-
-  <!--Service Server -->
-  <node pkg="tests" type="service_server" name="service_server" output="screen" />
 
   <!--Ros serial python -->
   <node pkg="rosserial_python" type="message_info_service.py" name="rosserial_message_info" />

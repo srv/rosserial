@@ -1,12 +1,22 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(rosserial_server)
 
-find_package(catkin REQUIRED COMPONENTS roscpp rosserial_msgs topic_tools evologics_ros)
-find_package(Boost REQUIRED COMPONENTS system thread)
+find_package(catkin REQUIRED COMPONENTS 
+  roscpp 
+  rosserial_msgs 
+  topic_tools 
+  evologics_ros 
+  message_generation)
+find_package(Boost REQUIRED COMPONENTS 
+  system thread)
 
 catkin_package(
   INCLUDE_DIRS include
-  CATKIN_DEPENDS roscpp rosserial_msgs topic_tools
+  CATKIN_DEPENDS 
+  roscpp 
+  rosserial_msgs 
+  topic_tools 
+  message_runtime
 )
 
 include_directories(
