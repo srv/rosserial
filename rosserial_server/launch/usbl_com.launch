@@ -12,7 +12,7 @@
 
 	<!--ROSSerial -->
 	<node pkg="rosserial_server" type="serial_node" name="rosserial_server" output="screen">
-		<rosparam command="load" file="$(find rosserial_server)/config/params_auv.yaml"/>
+		<rosparam command="load" file="$(find rosserial_server)/config/params_usbl.yaml"/>
 	</node>
 
 	<!--Ros serial python -->
